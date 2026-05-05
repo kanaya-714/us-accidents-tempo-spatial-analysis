@@ -112,3 +112,299 @@ Power BI / Excel / Tableau Visualizations
       |
       v
 Final Presentation and GitHub Documentation
+```
+
+## Step-by-Step Implementation
+
+1. **Upload Dataset to Cluster**
+
+```bash
+scp ~/Downloads/US_Accidents_March23.csv username@ipadress:/tmp/
+
+-- new linux terminal --
+
+ssh username@ipadress
+
+cd /tmp
+
+ls -lh
+```
+
+2. **Upload Data to HDFS**
+   
+```bash
+
+hdfs dfs -mkdir -p accidents_full
+
+hdfs dfs -put US_Accidents_March23.csv accidents_full/
+
+hdfs dfs -ls accidents_full
+```
+
+3. **Create Hive Table**
+
+```bash
+
+-- new hive terminal --
+
+ssh username@ipadress
+
+beeline
+
+USE username;
+
+DROP TABLE IF EXISTS accidents_full;
+
+CREATE EXTERNAL TABLE accidents_full (
+  id STRING,
+  source STRING,
+  severity STRING,
+  start_time STRING,
+  end_time STRING,
+  start_lat STRING,
+  start_lng STRING,
+  end_lat STRING,
+  end_lng STRING,
+  distance_mi STRING,
+  description STRING,
+  street STRING,
+  city STRING,
+  county STRING,
+  state STRING,
+  zipcode STRING,
+  country STRING,
+  timezone STRING,
+  airport_code STRING,
+  weather_timestamp STRING,
+  temperature_f STRING,
+  wind_chill_f STRING,
+  humidity STRING,
+  pressure_in STRING,
+  visibility_mi STRING,
+  wind_direction STRING,
+  wind_speed_mph STRING,
+  precipitation_in STRING,
+  weather_condition STRING,
+  amenity STRING,
+  bump STRING,
+  crossing STRING,
+  give_way STRING,
+  junction STRING,
+  no_exit STRING,
+  railway STRING,
+  roundabout STRING,
+  station STRING,
+  stop STRING,
+  traffic_calming STRING,
+  traffic_signal STRING,
+  turning_loop STRING,
+  sunrise_sunset STRING,
+  civil_twilight STRING,
+  nautical_twilight STRING,
+  astronomical_twilight STRING
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+WITH SERDEPROPERTIES (
+  "separatorChar" = ",",
+  "quoteChar" = "\""
+)
+STORED AS TEXTFILE
+LOCATION '/user/username/accidents_full'
+TBLPROPERTIES ("skip.header.line.count"="1");
+```
+
+4. **Create Sample Table for Debugging**
+
+```bash
+
+DROP TABLE IF EXISTS accidents_debug;
+
+CREATE TABLE accidents_debug AS
+SELECT *
+FROM accidents_full
+LIMIT 10000;
+```
+
+5. **Exploratory Analysis for Debugging**
+
+```bash
+
+SELECT * FROM accidents_debug LIMIT 10;
+
+SELECT COUNT(*) FROM accidents_debug;
+
+SELECT hour(start_time) AS accident_hour,
+       COUNT(*) AS accident_count
+FROM accidents_debug
+GROUP BY hour(start_time)
+ORDER BY accident_count DESC;
+
+SELECT state,
+       COUNT(*) AS accident_count
+FROM accidents_debug
+GROUP BY state
+ORDER BY accident_count DESC
+LIMIT 10;
+
+SELECT city,
+       state,
+       COUNT(*) AS accident_count
+FROM accidents_debug
+WHERE city IS NOT NULL
+GROUP BY city, state
+ORDER BY accident_count DESC
+LIMIT 20;
+
+SELECT month(start_time) AS accident_month,
+       COUNT(*) AS accident_count
+FROM accidents_debug
+GROUP BY month(start_time)
+ORDER BY accident_month;
+
+SELECT hour(start_time) AS hour_of_day,
+       COUNT(*) AS accident_count
+FROM accidents_debug
+GROUP BY hour(start_time)
+ORDER BY hour_of_day;
+
+SELECT weather_condition,
+       severity,
+       COUNT(*) AS accident_count
+FROM accidents_debug
+WHERE weather_condition IS NOT NULL
+GROUP BY weather_condition, severity
+ORDER BY accident_count DESC
+LIMIT 30;
+```
+6. **Create Large Dataset Subset (>2GB)**
+
+```bash
+
+DROP TABLE IF EXISTS accidents_subset;
+
+CREATE TABLE accidents_subset AS
+SELECT *
+FROM accidents_full
+LIMIT 5019505; -- 2GB
+```
+
+7. **Full Dataset Analysis**
+
+```bash
+
+DESCRIBE FORMATTED accidents_subset;
+
+SELECT * FROM accidents_subset LIMIT 10;
+
+SELECT COUNT(*) FROM accidents_subset;
+
+SELECT state,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+GROUP BY state
+ORDER BY accident_count DESC
+LIMIT 10;
+
+SELECT city,
+       state,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+WHERE city IS NOT NULL
+GROUP BY city, state
+ORDER BY accident_count DESC
+LIMIT 20;
+
+SELECT hour(start_time) AS accident_hour,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+GROUP BY hour(start_time)
+ORDER BY hour(start_time) ASC;
+
+SELECT month(start_time) AS accident_month,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+GROUP BY month(start_time)
+ORDER BY accident_month;
+
+SELECT weather_condition,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+WHERE weather_condition IS NOT NULL
+GROUP BY weather_condition
+ORDER BY accident_count DESC
+LIMIT 20;
+
+SELECT weather_condition,
+       severity,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+WHERE weather_condition IS NOT NULL
+GROUP BY weather_condition, severity
+ORDER BY accident_count DESC
+LIMIT 30;
+
+SELECT start_lat,
+       start_lng,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+WHERE start_lat IS NOT NULL
+  AND start_lng IS NOT NULL
+GROUP BY start_lat, start_lng
+ORDER BY accident_count DESC
+LIMIT 50;
+
+SELECT year(cast(start_time AS timestamp)) AS accident_year,
+       COUNT(*) AS accident_count
+FROM accidents_subset
+WHERE start_time IS NOT NULL
+GROUP BY year(cast(start_time AS timestamp))
+ORDER BY accident_year ASC;
+```
+8. **Export Results to HDFS**
+   
+```bash
+
+INSERT OVERWRITE DIRECTORY '/user/username/accident_hotspots'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+SELECT start_lat,
+       start_lng,
+       start_time,
+       city,
+       state,
+FROM accidents_subset
+WHERE start_lat IS NOT NULL
+  AND start_lng IS NOT NULL
+LIMIT 10000;
+```
+
+9. **Retrieve Results**
+
+```bash
+
+-- linux terminal --
+
+hdfs dfs -ls accident_hotspots
+hdfs dfs -get accident_hotspots/000000_0 accident_hotspots.txt
+
+-- personal computer directory --
+
+scp username@ipadress:~/accident_hotspots.txt .
+
+```
+
+10. **Cleanup**
+
+```bash
+
+-- in hive terminal --
+
+DROP TABLE accidents_full;
+DROP TABLE accidents_debug;
+
+-- linux terminal --
+
+hdfs dfs -rm -r accidents_full
+
+rm /tmp/US_Accidents_March23.csv
+```
